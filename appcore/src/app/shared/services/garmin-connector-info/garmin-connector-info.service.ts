@@ -1,6 +1,5 @@
 import { Inject, Injectable } from "@angular/core";
 import { CollectionDef } from "../../data-store/collection-def";
-import { ElectronService } from "../../../desktop/electron/electron.service";
 import { ConnectorSyncDateTimeDao } from "../../dao/sync/connector-sync-date-time.dao";
 import { GarminConnectorInfo } from "@elevate/shared/sync/connectors/garmin-connector-info.model";
 import { ConnectorType } from "@elevate/shared/sync/connectors/connector-type.enum";
@@ -47,10 +46,7 @@ export class GarminConnectorInfoService {
     }
   };
 
-  constructor(
-    @Inject(ConnectorSyncDateTimeDao) private readonly connectorSyncDateTimeDao: ConnectorSyncDateTimeDao,
-    @Inject(ElectronService) private readonly electronService: ElectronService
-  ) {}
+  constructor(@Inject(ConnectorSyncDateTimeDao) private readonly connectorSyncDateTimeDao: ConnectorSyncDateTimeDao) {}
 
   public fetch(): GarminConnectorInfo {
     return GarminConnectorInfoService.GarminConnectorInfoDao.fetch();

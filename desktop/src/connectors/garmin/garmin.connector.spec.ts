@@ -4,7 +4,6 @@ import fs from "fs";
 import path from "path";
 import { GarminConnectClient, GarminActivitySummary } from "./garmin-connect.client";
 import { GarminConnector } from "./garmin.connector";
-import { FileConnector } from "../file/file.connector";
 import { ActivityFile } from "../file/activity-file.model";
 import { SportsLibProcessor } from "../../processors/sports-lib.processor";
 import { ActivityComputeProcessor } from "../../processors/activity-compute/activity-compute.processor";

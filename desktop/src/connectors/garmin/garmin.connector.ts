@@ -155,33 +155,41 @@ export class GarminConnector extends BaseConnector {
         return activities
           .reduce(
             (previousPromise: Promise<void>, activity: GarminActivitySummary) =>
-              previousPromise.then(() => {
-                if (this.stopRequested) {
-                  return Promise.reject(new StoppedSyncEvent(ConnectorType.GARMIN));
-                }
-
-                // On an incremental sync, Garmin returns activities most-recent-first: as soon
-                // as we reach an already-synced activity, every older one is synced too. Stop.
-                if (this.incrementalSync && this.caughtUp) {
-                  this.logger.info("Reached already synced Garmin activities. Stopping incremental sync.");
-                  syncEvents$.next(
-                    new GenericSyncEvent(ConnectorType.GARMIN, "Reached already synced activities. Stopping sync.")
-                  );
-                  return Promise.resolve();
-                }
-
-                return this.syncActivity(activity, downloadDir, syncEvents$).then(alreadyExisted => {
-                  // Remember we hit an already-synced activity so the next iteration can stop.
-                  if (alreadyExisted) {
-                    this.caughtUp = true;
-                  }
-                  return this.wait();
-                });
-              }),
+              previousPromise.then(() => this.syncNextActivity(activity, downloadDir, syncEvents$)),
             Promise.resolve()
           )
           .then(() => this.cleanupDirectory(downloadDir));
       });
+  }
+
+  /**
+   * Handle the sync loop step for a single activity: stop requested, incremental
+   * "caught up" short-circuit, then delegate to the actual activity sync.
+   */
+  private syncNextActivity(
+    activity: GarminActivitySummary,
+    downloadDir: string,
+    syncEvents$: Subject<SyncEvent>
+  ): Promise<void> {
+    if (this.stopRequested) {
+      return Promise.reject(new StoppedSyncEvent(ConnectorType.GARMIN));
+    }
+
+    // On an incremental sync, Garmin returns activities most-recent-first: as soon
+    // as we reach an already-synced activity, every older one is synced too. Stop.
+    if (this.incrementalSync && this.caughtUp) {
+      this.logger.info("Reached already synced Garmin activities. Stopping incremental sync.");
+      syncEvents$.next(new GenericSyncEvent(ConnectorType.GARMIN, "Reached already synced activities. Stopping sync."));
+      return Promise.resolve();
+    }
+
+    return this.syncActivity(activity, downloadDir, syncEvents$).then(alreadyExisted => {
+      // Remember we hit an already-synced activity so the next iteration can stop.
+      if (alreadyExisted) {
+        this.caughtUp = true;
+      }
+      return this.wait();
+    });
   }
 
   /**
@@ -257,47 +265,65 @@ export class GarminConnector extends BaseConnector {
         new GenericSyncEvent(ConnectorType.GARMIN, `Downloading activity "${activity.activityName}"...`)
       );
 
-      return this.garminConnectClient
-        .downloadOriginalActivityData(activity.activityId, downloadDir)
-        .then(zipPath => this.extractFitFromZip(zipPath, downloadDir))
-        .then((fitPath: string | null) => {
-          if (!fitPath) {
-            this.logger.warn(`No FIT file found for Garmin activity ${activity.activityId}. Skipping.`);
-            return Promise.resolve();
-          }
-
-          const activityFile = new ActivityFile(ActivityFileType.FIT, fitPath, new Date(activity.beginTimestamp));
-
-          return this.computeSportsLibEvent(activityFile).then((result: { event: EventJSONInterface }) => {
-            return result.event.activities.reduce(
-              (previousActivityProcessed: Promise<void>, sportsLibActivity: ActivityJSONInterface) =>
-                previousActivityProcessed.then(() =>
-                  this.processActivity(activity.activityId, sportsLibActivity, activityFile, syncEvents$)
-                ),
-              Promise.resolve()
-            );
-          });
-        })
-        .then(() => this.cleanupDirectory(path.join(downloadDir, String(activity.activityId))))
-        .catch(error => {
-          this.logger.error(error);
-
-          if (error && error.type === SyncEventType.ERROR) {
-            syncEvents$.next(error);
-          } else {
-            syncEvents$.next(
-              ErrorSyncEvent.SYNC_ERROR_COMPUTE.create(
-                ConnectorType.GARMIN,
-                `Unable to sync Garmin activity "${activity.activityName}" (id ${activity.activityId})`,
-                null,
-                error
-              )
-            );
-          }
-          return Promise.resolve(false);
-        })
-        .then(() => Promise.resolve(false));
+      return this.downloadAndProcessActivity(activity, downloadDir, syncEvents$).then(() => Promise.resolve(false));
     });
+  }
+
+  /**
+   * Download the original FIT file of a Garmin activity and process it through the
+   * sports-lib pipeline. Never rejects: failures are reported as sync error events.
+   */
+  private downloadAndProcessActivity(
+    activity: GarminActivitySummary,
+    downloadDir: string,
+    syncEvents$: Subject<SyncEvent>
+  ): Promise<void> {
+    return this.garminConnectClient
+      .downloadOriginalActivityData(activity.activityId, downloadDir)
+      .then(zipPath => this.extractFitFromZip(zipPath, downloadDir))
+      .then((fitPath: string | null) => {
+        if (!fitPath) {
+          this.logger.warn(`No FIT file found for Garmin activity ${activity.activityId}. Skipping.`);
+          return Promise.resolve();
+        }
+
+        const activityFile = new ActivityFile(ActivityFileType.FIT, fitPath, new Date(activity.beginTimestamp));
+
+        return this.computeSportsLibEvent(activityFile).then((result: { event: EventJSONInterface }) => {
+          return result.event.activities.reduce(
+            (previousActivityProcessed: Promise<void>, sportsLibActivity: ActivityJSONInterface) =>
+              previousActivityProcessed.then(() =>
+                this.processActivity(activity.activityId, sportsLibActivity, activityFile, syncEvents$)
+              ),
+            Promise.resolve()
+          );
+        });
+      })
+      .then(() => this.cleanupDirectory(path.join(downloadDir, String(activity.activityId))))
+      .catch(error => {
+        this.reportActivitySyncError(activity, error, syncEvents$);
+        return Promise.resolve();
+      });
+  }
+
+  /**
+   * Report a Garmin activity sync failure through the sync events stream.
+   */
+  private reportActivitySyncError(activity: GarminActivitySummary, error: any, syncEvents$: Subject<SyncEvent>): void {
+    this.logger.error(error);
+
+    if (error && error.type === SyncEventType.ERROR) {
+      syncEvents$.next(error);
+    } else {
+      syncEvents$.next(
+        ErrorSyncEvent.SYNC_ERROR_COMPUTE.create(
+          ConnectorType.GARMIN,
+          `Unable to sync Garmin activity "${activity.activityName}" (id ${activity.activityId})`,
+          null,
+          error
+        )
+      );
+    }
   }
 
   /**
