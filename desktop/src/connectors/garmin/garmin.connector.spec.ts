@@ -90,6 +90,23 @@ describe("GarminConnector", () => {
   let garminConnectorConfig: GarminConnectorConfig;
   let findLocalActivitiesSpy: jasmine.Spy;
 
+  const fakeGarminActivity = (
+    activityId: number,
+    activityName: string,
+    startTimeGMT: string,
+    beginTimestamp: number
+  ): GarminActivitySummary =>
+    ({
+      activityId,
+      activityName,
+      startTimeGMT,
+      beginTimestamp,
+      distance: 5000,
+      duration: 1800,
+      activityType: { typeId: 1, typeKey: "running" },
+      locationName: "Lyon"
+    } as unknown as GarminActivitySummary);
+
   beforeEach(() => {
     garminConnector = container.resolve(GarminConnector);
     garminConnectClient = container.resolve(GarminConnectClient);
@@ -219,38 +236,9 @@ describe("GarminConnector", () => {
     );
 
     // Three activities, most recent first. The two older ones already exist locally.
-    const newerActivity = {
-      activityId: 111,
-      activityName: "New Run",
-      startTimeGMT: "2020-01-03 10:00:00",
-      beginTimestamp: 1578045600000,
-      distance: 5000,
-      duration: 1800,
-      activityType: { typeId: 1, typeKey: "running" },
-      locationName: "Lyon"
-    } as unknown as GarminActivitySummary;
-
-    const middleActivity = {
-      activityId: 222,
-      activityName: "Already Synced Run",
-      startTimeGMT: "2020-01-02 10:00:00",
-      beginTimestamp: 1577959200000,
-      distance: 5000,
-      duration: 1800,
-      activityType: { typeId: 1, typeKey: "running" },
-      locationName: "Lyon"
-    } as unknown as GarminActivitySummary;
-
-    const oldestActivity = {
-      activityId: 333,
-      activityName: "Oldest Run",
-      startTimeGMT: "2020-01-01 10:00:00",
-      beginTimestamp: 1577872800000,
-      distance: 5000,
-      duration: 1800,
-      activityType: { typeId: 1, typeKey: "running" },
-      locationName: "Lyon"
-    } as unknown as GarminActivitySummary;
+    const newerActivity = fakeGarminActivity(111, "New Run", "2020-01-03 10:00:00", 1578045600000);
+    const middleActivity = fakeGarminActivity(222, "Already Synced Run", "2020-01-02 10:00:00", 1577959200000);
+    const oldestActivity = fakeGarminActivity(333, "Oldest Run", "2020-01-01 10:00:00", 1577872800000);
 
     spyOn(garminConnectClient, "isAuthenticated").and.returnValue(true);
     spyOn(garminConnectClient, "listActivities").and.returnValue(
@@ -294,16 +282,7 @@ describe("GarminConnector", () => {
 
   it("should skip downloading an already synced activity on a full sync", done => {
     // Given: full sync (no "sync from" date time)
-    const existingActivity = {
-      activityId: 333,
-      activityName: "Already Synced",
-      startTimeGMT: "2020-01-01 10:00:00",
-      beginTimestamp: 1577872800000,
-      distance: 5000,
-      duration: 1800,
-      activityType: { typeId: 1, typeKey: "running" },
-      locationName: "Lyon"
-    } as unknown as GarminActivitySummary;
+    const existingActivity = fakeGarminActivity(333, "Already Synced", "2020-01-01 10:00:00", 1577872800000);
 
     spyOn(garminConnectClient, "isAuthenticated").and.returnValue(true);
     spyOn(garminConnectClient, "listActivities").and.returnValue(Promise.resolve([existingActivity]));
