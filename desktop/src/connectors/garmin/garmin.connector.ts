@@ -309,10 +309,14 @@ export class GarminConnector extends BaseConnector {
   /**
    * Report a Garmin activity sync failure through the sync events stream.
    */
-  private reportActivitySyncError(activity: GarminActivitySummary, error: any, syncEvents$: Subject<SyncEvent>): void {
+  private reportActivitySyncError(
+    activity: GarminActivitySummary,
+    error: Error | SyncEvent,
+    syncEvents$: Subject<SyncEvent>
+  ): void {
     this.logger.error(error);
 
-    if (error && error.type === SyncEventType.ERROR) {
+    if ("type" in error && error.type === SyncEventType.ERROR) {
       syncEvents$.next(error);
     } else {
       syncEvents$.next(
@@ -320,7 +324,7 @@ export class GarminConnector extends BaseConnector {
           ConnectorType.GARMIN,
           `Unable to sync Garmin activity "${activity.activityName}" (id ${activity.activityId})`,
           null,
-          error
+          error instanceof Error ? error : null
         )
       );
     }
